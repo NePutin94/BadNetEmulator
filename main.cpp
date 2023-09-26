@@ -61,6 +61,7 @@ public:
     void run()
     {
         NetEmulator::setTheme();
+        emulator.recived();
         while(!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
