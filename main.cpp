@@ -45,7 +45,7 @@ public:
         ImGui::StyleColorsDark();
 
         ImGui_ImplGlfw_InitForOpenGL(window, true);
-        ImGui_ImplOpenGL3_Init("#version 130");
+        ImGui_ImplOpenGL3_Init("#version 120");
     }
 
     ~TestApp()
@@ -61,7 +61,6 @@ public:
     void run()
     {
         NetEmulator::setTheme();
-        emulator.recived();
         while(!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
@@ -69,7 +68,7 @@ public:
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            ImGui::ShowDemoWindow();
+            //ImGui::ShowDemoWindow();
 
             emulator.draw();
 

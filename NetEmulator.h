@@ -37,8 +37,14 @@ public:
                                        (io.DisplaySize.y - (io.DisplaySize.y - 50)) / 2), ImGuiCond_Always, {0, 0});
         if (ImGui::Begin("_NetEmulator_", nullptr,
                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration)) {
-
             if (ImGui::BeginChild("_ControlMenu_", ImVec2(0, 90))) {
+                const char* items[] = { "eno1", "eno2" };
+                static int item_current = 0;
+                if(ImGui::Combo("net-interface", &item_current, items, 2))
+                {
+                    interface = interfaces[item_current];
+                }
+                ImGui::Spacing();
                 if (ImGui::Button("Add stage")) {
                     netem_params.push_back({});
                 }
@@ -65,7 +71,7 @@ public:
                     for (auto &item: netem_params) {
                         ImGui::PushID(index);
                         if (index == current_stage) {
-                            ImGui::Text("stage %i is running with parameters delay %i, loss %f, (left %li s)", index, item.delay, item.packet_loss,
+                            ImGui::Text("stage %i is running with parameters delay %i, loss %f (left %li s)", index, item.delay, item.packet_loss,
                                         item.duaration - std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - current_stage_start_time.load()).count());
                         } else if (index < current_stage) {
                             ImGui::Text("stage %i done", index);
@@ -79,7 +85,7 @@ public:
                 ImGui::EndChild();
             }
 
-            if (ImGui::Button("Start")) {
+            if (!netem_params.empty() && ImGui::Button("Start")) {
                 start();
             }
             if (ImGui::Button("Stop")) {
@@ -89,25 +95,6 @@ public:
         }
     }
 
-    float recived() {
-        float recive;
-        std::ifstream stream("/proc/net/dev");
-        if (stream.is_open()) {
-            std::string line;
-            std::string skip;
-            while (line.find(interface) == std::string::npos) {
-                std::getline(stream, line);
-                if (stream.eof() || stream.bad())
-                    break;
-            }
-            std::istringstream linestream(line);
-            linestream >> skip;
-            linestream >> recive;
-        }
-        stream.close();
-        return recive;
-    }
-
     void start() {
         is_start = true;
         copy_netem_params = netem_params;
@@ -115,9 +102,9 @@ public:
         worker = std::thread([this]() {
             int index = 0;
             for (auto &item: copy_netem_params) {
-                auto command = fmt::format("sudo tc qdisc add dev enp4s0 root netem delay {}ms loss {}% corrupt {}% duplicate {}%", item.delay,
-                                           item.packet_loss, item.packet_corrupt, item.packet_duplicate);
-                int result = std::system(command.c_str());
+                //auto command = fmt::format("sudo tc qdisc add dev enp4s0 root netem delay {}ms loss {}% corrupt {}% duplicate {}%", item.delay,
+                 //                          item.packet_loss, item.packet_corrupt, item.packet_duplicate);
+                //int result = std::system(command.c_str());
                 current_stage = index++;
                 current_stage_start_time = std::chrono::system_clock::now();
                 std::this_thread::sleep_for(std::chrono::seconds(item.duaration));
@@ -192,6 +179,7 @@ private:
     std::vector<NetemParams> netem_params;
     std::vector<NetemParams> copy_netem_params;
     std::string interface = "eno1";
+    std::vector<std::string> interfaces = {"eno1", "eno2"};
 };
 
 #endif //BADNETEMULATOR_NETEMULATOR_H
