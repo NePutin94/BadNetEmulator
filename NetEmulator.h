@@ -34,6 +34,13 @@ public:
         get_interfaces();
     }
 
+    ~NetEmulator()
+    {
+        is_start = false;
+        if (worker.joinable())
+            worker.join();
+    }
+
     void get_interfaces() {
         struct ifaddrs *addrs, *tmp;
 
@@ -180,8 +187,8 @@ public:
 
         {
             float average = 0.0f;
-            for (int n = 0; n < values.size(); n++)
-                average += values[n];
+            for (const auto& value : values)
+                average += value;
             average /= (float) values.size();
             float max = *std::max_element(values.begin(), values.end());
             char overlay[32];
@@ -230,7 +237,7 @@ public:
                     return;
                 auto command = fmt::format("sudo tc qdisc add dev {} root netem delay {}ms loss {}% corrupt {}% duplicate {}%", interface, item.delay,
                                            item.packet_loss, item.packet_corrupt, item.packet_duplicate);
-                int result = std::system(command.c_str());
+                std::system(command.c_str());
                 current_stage = index++;
                 current_stage_start_time = std::chrono::system_clock::now();
                 std::this_thread::sleep_for(std::chrono::seconds(item.duaration));
