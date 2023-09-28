@@ -31,7 +31,7 @@ public:
         if(version == 0)
             return;
 
-        glfwSwapInterval(0);
+        glfwSwapInterval(1);
 
         IMGUI_CHECKVERSION();
 

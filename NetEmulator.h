@@ -31,19 +31,16 @@ struct TestParams {
 class NetEmulator {
 public:
     NetEmulator() {
-        plot_updatetp = std::chrono::system_clock::now();
         get_interfaces();
     }
 
-    void get_interfaces()
-    {
-        struct ifaddrs *addrs,*tmp;
+    void get_interfaces() {
+        struct ifaddrs *addrs, *tmp;
 
         getifaddrs(&addrs);
         tmp = addrs;
 
-        while (tmp)
-        {
+        while (tmp) {
             if (tmp->ifa_addr && tmp->ifa_addr->sa_family == AF_PACKET)
                 interfaces.emplace_back(tmp->ifa_name);
             tmp = tmp->ifa_next;
@@ -61,9 +58,8 @@ public:
         if (ImGui::Begin("_NetEmulator_", nullptr,
                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration)) {
             if (ImGui::BeginChild("_ControlMenu_", ImVec2(0, 90))) {
-                const char* interfaces_c[20];
-                for(int i = 0; i < 20 && i < interfaces.size();++i)
-                {
+                const char *interfaces_c[20];
+                for (int i = 0; i < 20 && i < interfaces.size(); ++i) {
                     interfaces_c[i] = interfaces[i].c_str();
                 }
                 static int item_current = 0;
@@ -117,35 +113,36 @@ public:
             if (ImGui::Button("Stop")) {
                 stop();
                 is_start = false;
-                if(worker.joinable())
+                if (worker.joinable())
                     worker.join();
             }
 
-            plot();
+            plot_recived_bytes();
+            ImGui::Spacing();
+            plot_transmitted_bytes();
             ImGui::End();
         }
     }
 
-    void plot()
-    {
-        if(interface.empty())
+    void plot_recived_bytes() {
+        if (interface.empty())
             return;
-        static std::array<float,90> values = {};
+        static std::array<float, 40> values = {};
         static int curr = values.size();
 
-        if (plot_updatetp < std::chrono::system_clock::now()) {
+        if (plot_update_rx < std::chrono::system_clock::now()) {
             static float r_new = recived();
             static float r_old;
             r_old = r_new;
             r_new = recived();
             auto delta = r_new - r_old;
-            if (curr < 90) {
+            if (curr < values.size()) {
                 values[curr--] = delta;
             } else {
                 std::rotate(values.begin(), values.begin() + 1, values.end());
                 values.back() = delta;
             }
-            plot_updatetp = std::chrono::system_clock::now() + std::chrono::seconds(1);
+            plot_update_rx = std::chrono::system_clock::now() + std::chrono::milliseconds(600);
         }
 
         {
@@ -154,10 +151,42 @@ public:
                 average += values[n];
             average /= (float) values.size();
             float max = *std::max_element(values.begin(), values.end());
-            float min = *std::min_element(values.begin(), values.end());
             char overlay[32];
             sprintf(overlay, "avg %f", average);
-            ImGui::PlotLines("rx_bytes", values.data(), values.size(), 0, overlay, min, max, ImVec2(0, 80.0f));
+            ImGui::PlotLines(fmt::format("rx_bytes (max:{})", max).c_str(), values.data(), values.size(), 0, overlay, 0, max, ImVec2(0, 90.0f));
+        }
+    }
+
+    void plot_transmitted_bytes() {
+        if (interface.empty())
+            return;
+        static std::array<float, 40> values = {};
+        static int curr = values.size();
+
+        if (plot_update_tx < std::chrono::system_clock::now()) {
+            static float r_new = transmitted();
+            static float r_old;
+            r_old = r_new;
+            r_new = transmitted();
+            auto delta = r_new - r_old;
+            if (curr < values.size()) {
+                values[curr--] = delta;
+            } else {
+                std::rotate(values.begin(), values.begin() + 1, values.end());
+                values.back() = delta;
+            }
+            plot_update_tx = std::chrono::system_clock::now() + std::chrono::milliseconds(600);
+        }
+
+        {
+            float average = 0.0f;
+            for (int n = 0; n < values.size(); n++)
+                average += values[n];
+            average /= (float) values.size();
+            float max = *std::max_element(values.begin(), values.end());
+            char overlay[32];
+            sprintf(overlay, "avg %f", average);
+            ImGui::PlotLines(fmt::format("tx_bytes (max:{})", max).c_str(), values.data(), values.size(), 0, overlay, 0, max, ImVec2(0, 90.0f));
         }
     }
 
@@ -174,15 +203,30 @@ public:
         return recive;
     }
 
+    float transmitted() {
+        float transmit;
+        std::ifstream stream(fmt::format("/sys/class/net/{}/statistics/tx_bytes", interface));
+        if (stream.is_open()) {
+            std::string line;
+            std::getline(stream, line);
+            std::istringstream linestream(line);
+            linestream >> transmit;
+        }
+        stream.close();
+        return transmit;
+    }
+
     void start() {
-        if(interface.empty())
+        if (interface.empty())
             return;
+        if (worker.joinable())
+            worker.join();
         is_start = true;
         copy_netem_params = netem_params;
         worker = std::thread([this]() {
             int index = 0;
             for (auto &item: copy_netem_params) {
-                if(!is_start)
+                if (!is_start)
                     return;
                 auto command = fmt::format("sudo tc qdisc add dev {} root netem delay {}ms loss {}% corrupt {}% duplicate {}%", interface, item.delay,
                                            item.packet_loss, item.packet_corrupt, item.packet_duplicate);
@@ -192,6 +236,7 @@ public:
                 std::this_thread::sleep_for(std::chrono::seconds(item.duaration));
                 stop();
             }
+            is_start = false;
         });
     }
 
@@ -254,7 +299,8 @@ public:
     }
 
 private:
-    std::chrono::time_point<std::chrono::system_clock> plot_updatetp;
+    std::chrono::time_point<std::chrono::system_clock> plot_update_rx;
+    std::chrono::time_point<std::chrono::system_clock> plot_update_tx;
     std::thread worker;
     std::atomic_bool is_start = false;
     std::atomic_int current_stage = 0;
