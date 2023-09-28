@@ -29,6 +29,10 @@ struct TestParams {
 
 class NetEmulator {
 public:
+    NetEmulator() {
+        plot_updatetp = std::chrono::system_clock::now();
+    }
+
     void draw() {
         auto io = ImGui::GetIO();
         ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - 50,
@@ -38,10 +42,9 @@ public:
         if (ImGui::Begin("_NetEmulator_", nullptr,
                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration)) {
             if (ImGui::BeginChild("_ControlMenu_", ImVec2(0, 90))) {
-                const char* items[] = { "eno1", "eno2" };
+                const char *items[] = {"eno1", "eno2"};
                 static int item_current = 0;
-                if(ImGui::Combo("net-interface", &item_current, items, 2))
-                {
+                if (ImGui::Combo("net-interface", &item_current, items, 2)) {
                     interface = interfaces[item_current];
                 }
                 ImGui::Spacing();
@@ -91,8 +94,56 @@ public:
             if (ImGui::Button("Stop")) {
                 stop();
             }
+
+            plot();
             ImGui::End();
         }
+    }
+
+    void plot()
+    {
+        static std::array<float,90> values = {};
+        static int curr = values.size();
+
+        if (plot_updatetp < std::chrono::system_clock::now()) {
+            static float r_new = recived();
+            static float r_old;
+            r_old = r_new;
+            r_new = recived();
+            auto delta = r_new - r_old;
+            if (curr < 90) {
+                values[curr--] = delta;
+            } else {
+                std::rotate(values.begin(), values.begin() + 1, values.end());
+                values.back() = delta;
+            }
+            plot_updatetp = std::chrono::system_clock::now() + std::chrono::seconds(1);
+        }
+
+        {
+            float average = 0.0f;
+            for (int n = 0; n < values.size(); n++)
+                average += values[n];
+            average /= (float) values.size();
+            float max = *std::max_element(values.begin(), values.end());
+            float min = *std::min_element(values.begin(), values.end());
+            char overlay[32];
+            sprintf(overlay, "avg %f", average);
+            ImGui::PlotLines("rx_bytes", values.data(), values.size(), 0, overlay, min, max, ImVec2(0, 80.0f));
+        }
+    }
+
+    float recived() {
+        float recive;
+        std::ifstream stream(fmt::format("/sys/class/net/{}/statistics/rx_bytes", interface));
+        if (stream.is_open()) {
+            std::string line;
+            std::getline(stream, line);
+            std::istringstream linestream(line);
+            linestream >> recive;
+        }
+        stream.close();
+        return recive;
     }
 
     void start() {
@@ -102,9 +153,9 @@ public:
         worker = std::thread([this]() {
             int index = 0;
             for (auto &item: copy_netem_params) {
-                //auto command = fmt::format("sudo tc qdisc add dev enp4s0 root netem delay {}ms loss {}% corrupt {}% duplicate {}%", item.delay,
-                 //                          item.packet_loss, item.packet_corrupt, item.packet_duplicate);
-                //int result = std::system(command.c_str());
+                auto command = fmt::format("sudo tc qdisc add dev {} root netem delay {}ms loss {}% corrupt {}% duplicate {}%", interface, item.delay,
+                                           item.packet_loss, item.packet_corrupt, item.packet_duplicate);
+                int result = std::system(command.c_str());
                 current_stage = index++;
                 current_stage_start_time = std::chrono::system_clock::now();
                 std::this_thread::sleep_for(std::chrono::seconds(item.duaration));
@@ -114,7 +165,7 @@ public:
     }
 
     void stop() {
-        int result = std::system("sudo tc qdisc del dev eno1 root");
+        int result = std::system(fmt::format("sudo tc qdisc del dev {} root", interface).c_str());
         fmt::print("stop {}\n", result);
     }
 
@@ -172,6 +223,7 @@ public:
     }
 
 private:
+    std::chrono::time_point<std::chrono::system_clock> plot_updatetp;
     std::thread worker;
     bool is_start = false;
     std::atomic_int current_stage = 0;

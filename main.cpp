@@ -68,7 +68,7 @@ public:
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            //ImGui::ShowDemoWindow();
+            ImGui::ShowDemoWindow();
 
             emulator.draw();
 
