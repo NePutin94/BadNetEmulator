@@ -7,6 +7,7 @@
 #include <thread>
 #include <fstream>
 #include <sstream>
+#include <ifaddrs.h>
 
 struct NetemParams {
     int duaration;
@@ -31,6 +32,24 @@ class NetEmulator {
 public:
     NetEmulator() {
         plot_updatetp = std::chrono::system_clock::now();
+        get_interfaces();
+    }
+
+    void get_interfaces()
+    {
+        struct ifaddrs *addrs,*tmp;
+
+        getifaddrs(&addrs);
+        tmp = addrs;
+
+        while (tmp)
+        {
+            if (tmp->ifa_addr && tmp->ifa_addr->sa_family == AF_PACKET)
+                interfaces.emplace_back(tmp->ifa_name);
+            tmp = tmp->ifa_next;
+        }
+
+        freeifaddrs(addrs);
     }
 
     void draw() {
@@ -42,9 +61,13 @@ public:
         if (ImGui::Begin("_NetEmulator_", nullptr,
                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration)) {
             if (ImGui::BeginChild("_ControlMenu_", ImVec2(0, 90))) {
-                const char *items[] = {"eno1", "eno2"};
+                const char* interfaces_c[20];
+                for(int i = 0; i < 20 && i < interfaces.size();++i)
+                {
+                    interfaces_c[i] = interfaces[i].c_str();
+                }
                 static int item_current = 0;
-                if (ImGui::Combo("net-interface", &item_current, items, 2)) {
+                if (ImGui::Combo("net-interface", &item_current, interfaces_c, 2)) {
                     interface = interfaces[item_current];
                 }
                 ImGui::Spacing();
@@ -93,6 +116,9 @@ public:
             }
             if (ImGui::Button("Stop")) {
                 stop();
+                is_start = false;
+                if(worker.joinable())
+                    worker.join();
             }
 
             plot();
@@ -102,6 +128,8 @@ public:
 
     void plot()
     {
+        if(interface.empty())
+            return;
         static std::array<float,90> values = {};
         static int curr = values.size();
 
@@ -147,12 +175,15 @@ public:
     }
 
     void start() {
+        if(interface.empty())
+            return;
         is_start = true;
         copy_netem_params = netem_params;
-
         worker = std::thread([this]() {
             int index = 0;
             for (auto &item: copy_netem_params) {
+                if(!is_start)
+                    return;
                 auto command = fmt::format("sudo tc qdisc add dev {} root netem delay {}ms loss {}% corrupt {}% duplicate {}%", interface, item.delay,
                                            item.packet_loss, item.packet_corrupt, item.packet_duplicate);
                 int result = std::system(command.c_str());
@@ -225,13 +256,13 @@ public:
 private:
     std::chrono::time_point<std::chrono::system_clock> plot_updatetp;
     std::thread worker;
-    bool is_start = false;
+    std::atomic_bool is_start = false;
     std::atomic_int current_stage = 0;
     std::atomic<std::chrono::time_point<std::chrono::system_clock>> current_stage_start_time;
     std::vector<NetemParams> netem_params;
     std::vector<NetemParams> copy_netem_params;
-    std::string interface = "eno1";
-    std::vector<std::string> interfaces = {"eno1", "eno2"};
+    std::string interface = "";
+    std::vector<std::string> interfaces;
 };
 
 #endif //BADNETEMULATOR_NETEMULATOR_H
